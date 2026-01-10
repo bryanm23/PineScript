@@ -1,0 +1,293 @@
+//@version=5
+indicator("Day Trading Signals - Gold & Crypto", shorttitle="DT Signals", overlay=true)
+
+// ============================================================================
+// ASSET TYPE SELECTION
+// ============================================================================
+asset_type = input.string("Gold", "Asset Type", options=["Gold", "Crypto"], 
+     tooltip="Select Gold for futures or Crypto for XRP/cryptocurrency")
+
+// ============================================================================
+// GOLD-SPECIFIC SETTINGS
+// ============================================================================
+gold_rsi_length = input.int(14, "Gold RSI Length", minval=1, group="Gold Settings")
+gold_rsi_overbought = input.int(70, "Gold RSI Overbought", minval=50, maxval=100, group="Gold Settings")
+gold_rsi_oversold = input.int(30, "Gold RSI Oversold", minval=0, maxval=50, group="Gold Settings")
+gold_ema_fast = input.int(9, "Gold Fast EMA", minval=1, group="Gold Settings")
+gold_ema_slow = input.int(21, "Gold Slow EMA", minval=1, group="Gold Settings")
+gold_macd_fast = input.int(12, "Gold MACD Fast", minval=1, group="Gold Settings")
+gold_macd_slow = input.int(26, "Gold MACD Slow", minval=1, group="Gold Settings")
+gold_macd_signal = input.int(9, "Gold MACD Signal", minval=1, group="Gold Settings")
+gold_volume_threshold = input.float(1.2, "Gold Volume Multiplier", minval=1.0, step=0.1, group="Gold Settings")
+
+// ============================================================================
+// CRYPTO-SPECIFIC SETTINGS (Optimized for XRP)
+// ============================================================================
+crypto_rsi_length = input.int(14, "Crypto RSI Length", minval=1, group="Crypto Settings")
+crypto_rsi_overbought = input.int(75, "Crypto RSI Overbought", minval=50, maxval=100, group="Crypto Settings")
+crypto_rsi_oversold = input.int(25, "Crypto RSI Oversold", minval=0, maxval=50, group="Crypto Settings")
+crypto_ema_fast = input.int(8, "Crypto Fast EMA", minval=1, group="Crypto Settings")
+crypto_ema_slow = input.int(20, "Crypto Slow EMA", minval=1, group="Crypto Settings")
+crypto_macd_fast = input.int(10, "Crypto MACD Fast", minval=1, group="Crypto Settings")
+crypto_macd_slow = input.int(24, "Crypto MACD Slow", minval=1, group="Crypto Settings")
+crypto_macd_signal = input.int(7, "Crypto MACD Signal", minval=1, group="Crypto Settings")
+crypto_volume_threshold = input.float(1.5, "Crypto Volume Multiplier", minval=1.0, step=0.1, group="Crypto Settings")
+
+// ============================================================================
+// DYNAMIC PARAMETER SELECTION
+// ============================================================================
+rsi_length = asset_type == "Gold" ? gold_rsi_length : crypto_rsi_length
+rsi_overbought = asset_type == "Gold" ? gold_rsi_overbought : crypto_rsi_overbought
+rsi_oversold = asset_type == "Gold" ? gold_rsi_oversold : crypto_rsi_oversold
+ema_fast_period = asset_type == "Gold" ? gold_ema_fast : crypto_ema_fast
+ema_slow_period = asset_type == "Gold" ? gold_ema_slow : crypto_ema_slow
+macd_fast_period = asset_type == "Gold" ? gold_macd_fast : crypto_macd_fast
+macd_slow_period = asset_type == "Gold" ? gold_macd_slow : crypto_macd_slow
+macd_signal_period = asset_type == "Gold" ? gold_macd_signal : crypto_macd_signal
+volume_threshold = asset_type == "Gold" ? gold_volume_threshold : crypto_volume_threshold
+
+// ============================================================================
+// INDICATOR CALCULATIONS
+// ============================================================================
+
+// RSI Calculation (Relative Strength Index)
+rsi = ta.rsi(close, rsi_length)
+
+// EMA Calculation (Exponential Moving Averages)
+ema_fast = ta.ema(close, ema_fast_period)
+ema_slow = ta.ema(close, ema_slow_period)
+
+// MACD Calculation
+[macd_line, signal_line, hist_line] = ta.macd(close, macd_fast_period, macd_slow_period, macd_signal_period)
+
+// Volume Analysis
+volume_ma = ta.sma(volume, 20)
+volume_spike = volume > (volume_ma * volume_threshold)
+
+// Support and Resistance Levels (using pivot points)
+pivot_high = ta.pivothigh(high, 5, 5)
+pivot_low = ta.pivotlow(low, 5, 5)
+var float resistance = na
+var float support = na
+
+if not na(pivot_high)
+    resistance := pivot_high
+if not na(pivot_low)
+    support := pivot_low
+
+// ATR for volatility measurement
+atr_length = input.int(14, "ATR Length", minval=1)
+atr = ta.atr(atr_length)
+atr_percent = (atr / close) * 100
+
+// ============================================================================
+// MARKET STRUCTURE ANALYSIS (Grimes' Concepts)
+// ============================================================================
+// Trend Detection using EMA slope and price position
+ema_slope_fast = ema_fast - ema_fast[5]
+ema_slope_slow = ema_slow - ema_slow[5]
+price_above_ema = close > ema_fast and close > ema_slow
+price_below_ema = close < ema_fast and close < ema_slow
+
+// Market Structure: Uptrend, Downtrend, or Range
+is_uptrend = ema_fast > ema_slow and ema_slope_fast > 0 and price_above_ema
+is_downtrend = ema_fast < ema_slow and ema_slope_fast < 0 and price_below_ema
+is_range = not is_uptrend and not is_downtrend
+
+// Higher Highs and Higher Lows (Uptrend confirmation)
+hh = high > ta.highest(high[1], 10)
+ll = low > ta.lowest(low[1], 10)
+higher_highs_lows = hh or ll
+
+// Lower Highs and Lower Lows (Downtrend confirmation)
+lh = high < ta.highest(high[1], 10)
+hl = low < ta.lowest(low[1], 10)
+lower_highs_lows = lh or hl
+
+// ============================================================================
+// RISK MANAGEMENT (Stop Loss & Take Profit Calculations)
+// ============================================================================
+risk_reward_ratio = input.float(2.0, "Risk/Reward Ratio", minval=1.0, step=0.5, group="Risk Management")
+stop_loss_atr_mult = input.float(1.5, "Stop Loss (ATR Multiplier)", minval=0.5, step=0.5, group="Risk Management")
+take_profit_atr_mult = stop_loss_atr_mult * risk_reward_ratio
+
+// Calculate stop loss and take profit levels
+var float entry_price = na
+var float stop_loss_level = na
+var float take_profit_level = na
+
+// ============================================================================
+// ENHANCED VOLUME ANALYSIS
+// ============================================================================
+// Volume trend (increasing/decreasing)
+volume_trend_up = volume > volume[1] and volume[1] > volume[2]
+volume_trend_down = volume < volume[1] and volume[1] < volume[2]
+
+// Volume-Weighted Average Price (VWAP) for intraday trading
+vwap = ta.vwap(hlc3)
+
+// Price relative to VWAP (useful for day trading)
+price_above_vwap = close > vwap
+price_below_vwap = close < vwap
+
+// ============================================================================
+// PRICE ACTION PATTERNS
+// ============================================================================
+// Engulfing patterns
+bullish_engulfing = close > open and close[1] < open[1] and 
+                    close > open[1] and open < close[1] and 
+                    close > close[1]
+
+bearish_engulfing = close < open and close[1] > open[1] and 
+                    close < open[1] and open > close[1] and 
+                    close < close[1]
+
+// Pin bars (rejection candles)
+bullish_pin = (low < low[1] and close > (high + low) / 2) or 
+              (math.min(open, close) - low) > (high - math.max(open, close)) * 2
+
+bearish_pin = (high > high[1] and close < (high + low) / 2) or 
+              (high - math.max(open, close)) > (math.min(open, close) - low) * 2
+
+// ============================================================================
+// SIGNAL GENERATION LOGIC (Enhanced)
+// ============================================================================
+
+// BUY SIGNAL CONDITIONS (Long Entry) - Enhanced with Market Structure
+// 1. RSI oversold and starting to recover OR in uptrend
+// 2. Fast EMA crosses above slow EMA (bullish crossover) OR already bullish
+// 3. MACD line crosses above signal line (bullish crossover) OR already bullish
+// 4. Volume confirmation (spike or increasing trend)
+// 5. Price near support level OR price action pattern
+// 6. Market structure favors longs (uptrend or range breakout)
+
+ema_bullish_cross = ta.crossover(ema_fast, ema_slow)
+ema_bullish_aligned = ema_fast > ema_slow
+macd_bullish_cross = ta.crossover(macd_line, signal_line)
+macd_bullish_aligned = macd_line > signal_line
+rsi_oversold_recovery = rsi < rsi_oversold and rsi > rsi[1]
+rsi_bullish = rsi > 50 or (rsi < rsi_oversold + 10 and rsi > rsi[1])
+near_support = not na(support) and close <= support * 1.005 and close >= support * 0.995
+price_action_bullish = bullish_engulfing or bullish_pin
+
+// Enhanced buy conditions
+buy_signal = (ema_bullish_cross or (ema_bullish_aligned and is_uptrend)) and 
+             (macd_bullish_cross or macd_bullish_aligned) and 
+             rsi_bullish and 
+             (volume_spike or volume_trend_up) and
+             (near_support or price_action_bullish or price_above_vwap) and
+             (is_uptrend or (is_range and higher_highs_lows))
+
+// SELL SIGNAL CONDITIONS (Exit Long / Take Profit) - Enhanced
+// 1. RSI overbought OR trend reversal
+// 2. Fast EMA crosses below slow EMA (bearish crossover) OR trend weakening
+// 3. MACD line crosses below signal line (bearish crossover) OR momentum fading
+// 4. Price near resistance level OR price action pattern
+// 5. Volume confirmation
+
+ema_bearish_cross = ta.crossunder(ema_fast, ema_slow)
+ema_bearish_aligned = ema_fast < ema_slow
+macd_bearish_cross = ta.crossunder(macd_line, signal_line)
+macd_bearish_aligned = macd_line < signal_line
+rsi_overbought_zone = rsi > rsi_overbought
+rsi_bearish = rsi < 50 or (rsi > rsi_overbought - 10 and rsi < rsi[1])
+near_resistance = not na(resistance) and close >= resistance * 0.995 and close <= resistance * 1.005
+price_action_bearish = bearish_engulfing or bearish_pin
+
+// Enhanced sell conditions
+sell_signal = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
+              (macd_bearish_cross or macd_bearish_aligned) and 
+              rsi_bearish and
+              (near_resistance or price_action_bearish or price_below_vwap) and
+              (is_downtrend or (is_range and lower_highs_lows))
+
+// SHORT SIGNAL CONDITIONS (Short Entry) - Enhanced
+// 1. RSI overbought and starting to decline OR in downtrend
+// 2. Fast EMA crosses below slow EMA (bearish crossover) OR already bearish
+// 3. MACD line crosses below signal line (bearish crossover) OR already bearish
+// 4. Volume confirmation (spike or increasing trend)
+// 5. Price near resistance level OR price action pattern
+// 6. Market structure favors shorts (downtrend or range breakdown)
+
+rsi_overbought_decline = rsi > rsi_overbought and rsi < rsi[1]
+rsi_bearish_short = rsi > rsi_overbought - 5 or (is_downtrend and rsi > 50)
+
+// Enhanced short conditions
+short_signal = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
+               (macd_bearish_cross or macd_bearish_aligned) and 
+               rsi_bearish_short and 
+               (volume_spike or volume_trend_up) and
+               (near_resistance or price_action_bearish or price_below_vwap) and
+               (is_downtrend or (is_range and lower_highs_lows))
+
+// ============================================================================
+// VISUALIZATION
+// ============================================================================
+
+// Plot EMAs
+plot(ema_fast, "Fast EMA", color=color.blue, linewidth=2)
+plot(ema_slow, "Slow EMA", color=color.orange, linewidth=2)
+
+// Plot VWAP (important for day trading)
+plot(vwap, "VWAP", color=color.purple, linewidth=1, style=plot.style_line)
+
+// Plot Support/Resistance
+plot(support, "Support", color=color.green, style=plot.style_linebr, linewidth=1)
+plot(resistance, "Resistance", color=color.red, style=plot.style_linebr, linewidth=1)
+
+// Market Structure Background
+bgcolor(is_uptrend ? color.new(color.green, 95) : is_downtrend ? color.new(color.red, 95) : na, title="Market Structure")
+
+// Buy Signals
+plotshape(buy_signal, style=shape.triangleup, location=location.belowbar, 
+          color=color.lime, size=size.normal, title="BUY")
+
+// Sell Signals
+plotshape(sell_signal, style=shape.triangledown, location=location.abovebar, 
+          color=color.red, size=size.normal, title="SELL")
+
+// Short Signals
+plotshape(short_signal, style=shape.xcross, location=location.abovebar, 
+          color=color.fuchsia, size=size.normal, title="SHORT")
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+alertcondition(buy_signal, title="Buy Signal", message="BUY signal triggered for {{ticker}}")
+alertcondition(sell_signal, title="Sell Signal", message="SELL signal triggered for {{ticker}}")
+alertcondition(short_signal, title="Short Signal", message="SHORT signal triggered for {{ticker}}")
+
+// ============================================================================
+// TABLE DISPLAY (Optional - shows current indicator values)
+// ============================================================================
+show_table = input.bool(true, "Show Info Table", group="Display Options")
+
+if show_table and barstate.islast
+    var table info_table = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80), border_width=1)
+    table.cell(info_table, 0, 0, "Asset", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 0, asset_type, text_color=color.white)
+    table.cell(info_table, 0, 1, "Market", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    market_structure_text = is_uptrend ? "Uptrend" : is_downtrend ? "Downtrend" : "Range"
+    market_structure_color = is_uptrend ? color.lime : is_downtrend ? color.red : color.yellow
+    table.cell(info_table, 1, 1, market_structure_text, text_color=market_structure_color)
+    table.cell(info_table, 0, 2, "RSI", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 2, str.tostring(math.round(rsi, 2)), 
+               text_color=rsi > rsi_overbought ? color.red : rsi < rsi_oversold ? color.lime : color.white)
+    table.cell(info_table, 0, 3, "EMA Cross", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 3, ema_fast > ema_slow ? "Bullish" : "Bearish", 
+               text_color=ema_fast > ema_slow ? color.lime : color.red)
+    table.cell(info_table, 0, 4, "MACD", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 4, macd_line > signal_line ? "Bullish" : "Bearish", 
+               text_color=macd_line > signal_line ? color.lime : color.red)
+    table.cell(info_table, 0, 5, "Volume", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    volume_status = volume_spike ? "High" : volume_trend_up ? "Rising" : "Normal"
+    table.cell(info_table, 1, 5, volume_status, 
+               text_color=volume_spike ? color.yellow : volume_trend_up ? color.orange : color.white)
+    table.cell(info_table, 0, 6, "VWAP", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 6, price_above_vwap ? "Above" : "Below", 
+               text_color=price_above_vwap ? color.lime : color.red)
+    table.cell(info_table, 0, 7, "ATR %", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 7, str.tostring(math.round(atr_percent, 2)) + "%", text_color=color.white)
+    table.cell(info_table, 0, 8, "R:R Ratio", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 8, str.tostring(risk_reward_ratio) + ":1", text_color=color.white)
+
