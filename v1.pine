@@ -1,0 +1,381 @@
+//@version=5
+indicator("DjDahmer V9: Tiered Signals", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 1. SETTINGS & INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// A. Visuals
+group_vis = "Visuals"
+showPDH   = input.bool(true, "Show Prev Day High/Low", group=group_vis)
+show4H    = input.bool(true, "Show 4H High/Low", group=group_vis)
+showSMC   = input.bool(true, "Show BOS & Sweeps", group=group_vis)
+showFVG   = input.bool(true, "Show Fair Value Gaps (Boxes)", group=group_vis)
+
+// B. Risk Management
+group_risk = "Risk Management"
+atrLen = input.int(14, "ATR Length", group=group_risk)
+atrMult_SL = input.float(1.5, "ATR Multiplier - Stop Loss", group=group_risk)
+atrMult_TP = input.float(2.5, "ATR Multiplier - Take Profit", group=group_risk)
+useFixedExits = input.bool(false, "Override with SL/TP Exits", group=group_risk)
+
+atrVal = ta.atr(atrLen)
+
+// C. Strategy - NEW TIERED APPROACH
+group_strat = "Strategy Filters"
+signalMode = input.string("ALL SIGNALS", "Signal Mode", 
+     options=["ALL SIGNALS", "MEDIUM+ ONLY", "HIGH ONLY"], 
+     tooltip="ALL=More trades | MEDIUM+=Balanced | HIGH=Only best setups", 
+     group=group_strat)
+emaLen     = input.int(9, "EMA Length", group=group_strat)
+adxThresh  = input.int(8, "ADX Threshold (Relaxed)", group=group_strat)
+exitMode = input.string("EMA Close", "Exit Mode", options=["EMA Close", "Supertrend Flip", "Opposite Signal"], group=group_strat)
+
+// Track SL/TP levels
+var float longSL = na
+var float longTP = na
+var float shortSL = na
+var float shortTP = na
+var float entryPrice = na
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2. CALCULATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// A. Key Levels
+pdh = request.security(syminfo.tickerid, "D", high[1], barmerge.gaps_on, barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1], barmerge.gaps_on, barmerge.lookahead_off)
+h4h = request.security(syminfo.tickerid, "240", high[1], barmerge.gaps_on, barmerge.lookahead_off)
+h4l = request.security(syminfo.tickerid, "240", low[1],  barmerge.gaps_on, barmerge.lookahead_off)
+
+// B. Indicators
+emaVal   = ta.ema(close, emaLen)
+vwapVal  = ta.vwap(close)
+[stVal, stDir] = ta.supertrend(3.0, 10) // -1 = Bull, 1 = Bear
+[diplus, diminus, adxVal] = ta.dmi(14, 14)
+
+// C. Squeeze Logic (Volatility)
+[bMiddle, bUpper, bLower] = ta.bb(close, 20, 2.0)
+kUpper = ta.ema(close, 20) + (ta.atr(10) * 1.5)
+kLower = ta.ema(close, 20) - (ta.atr(10) * 1.5)
+isSqueeze = (bUpper < kUpper) and (bLower > kLower)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. SMC LOGIC (Structure & Gaps)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// BOS (Break of Structure)
+pivotLen = 5
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+var float lastHigh = na
+var float lastLow = na
+
+if not na(ph)
+    lastHigh := high[pivotLen]
+if not na(pl)
+    lastLow := low[pivotLen]
+
+// Detect Breaks
+bosBull = showSMC and not na(lastHigh) and ta.crossover(close, lastHigh)
+bosBear = showSMC and not na(lastLow) and ta.crossunder(close, lastLow)
+
+if bosBull
+    label.new(bar_index, high, "BOS", style=label.style_none, textcolor=color.green, size=size.tiny)
+    lastHigh := na
+if bosBear
+    label.new(bar_index, low, "BOS", style=label.style_none, textcolor=color.red, size=size.tiny)
+    lastLow := na
+
+// FVG (Fair Value Gaps)
+fvgBull = (low > high[2]) and showFVG
+fvgBear = (high < low[2]) and showFVG
+
+if fvgBull
+    box.new(bar_index[2], high[2], bar_index + 5, low, border_color=na, bgcolor=color.new(color.green, 90))
+if fvgBear
+    box.new(bar_index[2], low[2], bar_index + 5, high, border_color=na, bgcolor=color.new(color.red, 90))
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. CLEAN VISUALS
+// ═══════════════════════════════════════════════════════════════════════════
+
+plot(emaVal, "EMA 9", color=color.purple, linewidth=2)
+
+var line pdhLine = na, var line pdlLine = na
+var line h4hLine = na, var line h4lLine = na
+
+f_drawLevel(id, val, col, style) =>
+    line.delete(id) 
+    line.new(bar_index - 15, val, bar_index + 5, val, xloc.bar_index, extend.none, col, style=style, width=1)
+
+if showPDH and not na(pdh)
+    pdhLine := f_drawLevel(pdhLine, pdh, color.lime, line.style_solid)
+if showPDH and not na(pdl)
+    pdlLine := f_drawLevel(pdlLine, pdl, color.red, line.style_solid)
+if show4H and not na(h4h)
+    h4hLine := f_drawLevel(h4hLine, h4h, color.aqua, line.style_dashed)
+if show4H and not na(h4l)
+    h4lLine := f_drawLevel(h4lLine, h4l, color.orange, line.style_dashed)
+
+bgCol = isSqueeze ? color.gray : stDir == -1 ? color.green : color.red
+bgcolor(color.new(bgCol, 95))
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. TIERED SIGNAL SYSTEM (NEW!)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// BASE SIGNAL (Required for any trade)
+rawBuy  = ta.crossover(close, emaVal)
+rawSell = ta.crossunder(close, emaVal)
+
+// CONFIRMATION FACTORS (Each adds +1 point)
+f_calcStrength(isLong) =>
+    int score = 0
+    
+    // 1. Trend alignment (Supertrend)
+    if isLong and stDir == -1
+        score += 1
+    if not isLong and stDir == 1
+        score += 1
+    
+    // 2. VWAP alignment
+    if isLong and close > vwapVal
+        score += 1
+    if not isLong and close < vwapVal
+        score += 1
+    
+    // 3. Momentum (ADX)
+    if adxVal > adxThresh
+        score += 1
+    
+    // 4. Not in squeeze
+    if not isSqueeze
+        score += 1
+    
+    // 5. Recent BOS in our direction
+    bool recentBOS = false
+    if isLong and ta.barssince(bosBull) < 10
+        recentBOS := true
+    if not isLong and ta.barssince(bosBear) < 10
+        recentBOS := true
+    if recentBOS
+        score += 1
+    
+    score
+
+// Calculate signal strength (0-5 points)
+longStrength  = rawBuy  ? f_calcStrength(true)  : 0
+shortStrength = rawSell ? f_calcStrength(false) : 0
+
+// Define quality tiers
+// LOW    = 0-2 points (basic setup)
+// MEDIUM = 3 points   (decent setup)
+// HIGH   = 4-5 points (excellent setup)
+
+f_getQuality(int strength) =>
+    strength >= 4 ? "HIGH" : strength == 3 ? "MED" : "LOW"
+
+f_getQualityColor(int strength) =>
+    strength >= 4 ? color.new(color.lime, 0) : strength == 3 ? color.new(color.orange, 0) : color.new(color.gray, 0)
+
+// Filter based on user's signal mode preference
+allowSignal(int strength) =>
+    signalMode == "ALL SIGNALS" ? strength >= 0 : signalMode == "MEDIUM+ ONLY" ? strength >= 3 : strength >= 4
+
+validBuy  = rawBuy  and allowSignal(longStrength)
+validSell = rawSell and allowSignal(shortStrength)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. POSITION MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+var bool inLong  = false
+var bool inShort = false
+var int lastExitBar = 0
+var int entryStrength = 0
+cooldown = 3 // Reduced from 5
+
+// ══════════════════════════════════════════════════════════════════════════
+// ENTRIES
+// ══════════════════════════════════════════════════════════════════════════
+
+if validBuy and not inLong and not inShort and (bar_index - lastExitBar > cooldown)
+    entryPrice := close
+    entryStrength := longStrength
+    longSL := entryPrice - (atrVal * atrMult_SL)
+    longTP := entryPrice + (atrVal * atrMult_TP)
+    
+    string quality = f_getQuality(longStrength)
+    string stars = longStrength >= 4 ? "⭐⭐⭐" : longStrength == 3 ? "⭐⭐" : "⭐"
+    
+    label.new(bar_index, low, 
+         "LONG " + stars + " [" + quality + "]\n" +
+         "Entry: " + str.tostring(entryPrice, format.mintick) + 
+         "\nSL: " + str.tostring(longSL, format.mintick) + 
+         "\nTP: " + str.tostring(longTP, format.mintick), 
+         style=label.style_label_up, 
+         color=f_getQualityColor(longStrength), 
+         textcolor=color.white,
+         size=size.normal)
+    
+    inLong := true
+    alert("LONG Signal [" + quality + "] - Strength: " + str.tostring(longStrength) + "/5", alert.freq_once_per_bar_close)
+
+if validSell and not inLong and not inShort and (bar_index - lastExitBar > cooldown)
+    entryPrice := close
+    entryStrength := shortStrength
+    shortSL := entryPrice + (atrVal * atrMult_SL)
+    shortTP := entryPrice - (atrVal * atrMult_TP)
+    
+    string quality = f_getQuality(shortStrength)
+    string stars = shortStrength >= 4 ? "⭐⭐⭐" : shortStrength == 3 ? "⭐⭐" : "⭐"
+    
+    label.new(bar_index, high, 
+         "SHORT " + stars + " [" + quality + "]\n" +
+         "Entry: " + str.tostring(entryPrice, format.mintick) + 
+         "\nSL: " + str.tostring(shortSL, format.mintick) + 
+         "\nTP: " + str.tostring(shortTP, format.mintick), 
+         style=label.style_label_down, 
+         color=f_getQualityColor(shortStrength), 
+         textcolor=color.white,
+         size=size.normal)
+    
+    inShort := true
+    alert("SHORT Signal [" + quality + "] - Strength: " + str.tostring(shortStrength) + "/5", alert.freq_once_per_bar_close)
+
+// ══════════════════════════════════════════════════════════════════════════
+// EXIT CONDITIONS
+// ══════════════════════════════════════════════════════════════════════════
+
+exitLong_ema  = ta.crossunder(close, emaVal)
+exitShort_ema = ta.crossover(close, emaVal)
+exitLong_st   = (stDir == 1)
+exitShort_st  = (stDir == -1)
+exitLong_opp  = validSell
+exitShort_opp = validBuy
+
+exitLong = exitMode == "EMA Close" ? exitLong_ema : exitMode == "Supertrend Flip" ? exitLong_st : exitLong_opp
+
+exitShort = exitMode == "EMA Close" ? exitShort_ema : exitMode == "Supertrend Flip" ? exitShort_st : exitShort_opp
+
+// ══════════════════════════════════════════════════════════════════════════
+// EXITS
+// ══════════════════════════════════════════════════════════════════════════
+
+if inLong
+    if useFixedExits and low <= longSL
+        label.new(bar_index, low, "STOP LOSS", style=label.style_label_up, color=color.red, textcolor=color.white)
+        inLong := false
+        lastExitBar := bar_index
+        alert("STOP LOSS - LONG", alert.freq_once_per_bar_close)
+    else if useFixedExits and high >= longTP
+        label.new(bar_index, high, "TAKE PROFIT", style=label.style_label_down, color=color.blue, textcolor=color.white)
+        inLong := false
+        lastExitBar := bar_index
+        alert("TAKE PROFIT - LONG", alert.freq_once_per_bar_close)
+    else if not useFixedExits and exitLong
+        label.new(bar_index, high, "EXIT", style=label.style_label_down, color=color.orange, textcolor=color.black)
+        inLong := false
+        lastExitBar := bar_index
+        alert("EXIT LONG", alert.freq_once_per_bar_close)
+
+if inShort
+    if useFixedExits and high >= shortSL
+        label.new(bar_index, high, "STOP LOSS", style=label.style_label_down, color=color.red, textcolor=color.white)
+        inShort := false
+        lastExitBar := bar_index
+        alert("STOP LOSS - SHORT", alert.freq_once_per_bar_close)
+    else if useFixedExits and low <= shortTP
+        label.new(bar_index, low, "TAKE PROFIT", style=label.style_label_up, color=color.blue, textcolor=color.white)
+        inShort := false
+        lastExitBar := bar_index
+        alert("TAKE PROFIT - SHORT", alert.freq_once_per_bar_close)
+    else if not useFixedExits and exitShort
+        label.new(bar_index, low, "EXIT", style=label.style_label_up, color=color.orange, textcolor=color.black)
+        inShort := false
+        lastExitBar := bar_index
+        alert("EXIT SHORT", alert.freq_once_per_bar_close)
+
+// Plot SL/TP
+plot(inLong ? longSL : na, "Long SL", color.red, 2, plot.style_linebr)
+plot(inLong ? longTP : na, "Long TP", color.green, 2, plot.style_linebr)
+plot(inShort ? shortSL : na, "Short SL", color.red, 2, plot.style_linebr)
+plot(inShort ? shortTP : na, "Short TP", color.green, 2, plot.style_linebr)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. ENHANCED DASHBOARD WITH SIGNAL PREVIEW
+// ═══════════════════════════════════════════════════════════════════════════
+
+var table dash = table.new(position.bottom_right, 2, 7, bgcolor=color.new(color.black, 40), frame_color=color.gray, frame_width=1)
+
+if barstate.islast
+    // Header
+    table.cell(dash, 0, 0, "MARKET STATUS", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=color.gray, text_size=size.small)
+    
+    // 1. Trend
+    table.cell(dash, 0, 1, "Trend", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, stDir == -1 ? "BULLISH" : "BEARISH", 
+         text_color = stDir == -1 ? color.green : color.red, text_size=size.small)
+    
+    // 2. Volatility
+    table.cell(dash, 0, 2, "Volty", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, isSqueeze ? "SQUEEZE" : "ACTIVE", 
+         text_color = isSqueeze ? color.orange : color.green, text_size=size.small)
+    
+    // 3. Momentum
+    table.cell(dash, 0, 3, "Strength", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, adxVal > adxThresh ? "GOOD" : "WEAK", 
+         text_color = adxVal > adxThresh ? color.green : color.red, text_size=size.small)
+
+    // 4. NEXT SIGNAL STRENGTH (NEW!)
+    int potentialLong = close > emaVal ? f_calcStrength(true) : 0
+    int potentialShort = close < emaVal ? f_calcStrength(false) : 0
+    
+    string nextSignal = "WAIT"
+    color nextColor = color.gray
+    
+    if close > emaVal and potentialLong >= 3
+        nextSignal := "LONG SETUP (" + str.tostring(potentialLong) + "/5)"
+        nextColor := potentialLong >= 4 ? color.lime : color.yellow
+    else if close < emaVal and potentialShort >= 3
+        nextSignal := "SHORT SETUP (" + str.tostring(potentialShort) + "/5)"
+        nextColor := potentialShort >= 4 ? color.lime : color.yellow
+    else if close > emaVal
+        nextSignal := "LONG WEAK (" + str.tostring(potentialLong) + "/5)"
+        nextColor := color.orange
+    else if close < emaVal
+        nextSignal := "SHORT WEAK (" + str.tostring(potentialShort) + "/5)"
+        nextColor := color.orange
+    
+    table.cell(dash, 0, 4, "Next Signal", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, nextSignal, text_color=nextColor, text_size=size.tiny)
+
+    // 5. POSITION STATUS (NEW!)
+    string posStatus = inLong ? "IN LONG" : inShort ? "IN SHORT" : "NO POSITION"
+    color posColor = inLong ? color.green : inShort ? color.red : color.gray
+    
+    table.cell(dash, 0, 5, "Position", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, posStatus, text_color=posColor, text_size=size.small)
+    
+    // 6. VERDICT
+    string actionText = "WAIT"
+    color actionCol = color.gray
+    
+    if isSqueeze
+        actionText := "DO NOT TRADE"
+        actionCol := color.orange
+    else if inLong or inShort
+        actionText := "MANAGE TRADE"
+        actionCol := color.blue
+    else if stDir == -1 and adxVal > adxThresh and not isSqueeze
+        actionText := "LOOK FOR LONGS"
+        actionCol := color.green
+    else if stDir == 1 and adxVal > adxThresh and not isSqueeze
+        actionText := "LOOK FOR SHORTS"
+        actionCol := color.red
+        
+    table.cell(dash, 0, 6, "VERDICT", text_color=color.white, text_size=size.normal)
+    table.cell(dash, 1, 6, actionText, text_color=actionCol, text_size=size.normal, bgcolor=color.new(actionCol, 90))
