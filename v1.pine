@@ -134,13 +134,9 @@ price_below_vwap = close < vwap
 // PRICE ACTION PATTERNS
 // ============================================================================
 // Engulfing patterns
-bullish_engulfing = close > open and close[1] < open[1] and 
-                    close > open[1] and open < close[1] and 
-                    close > close[1]
+bullish_engulfing = close > open and close[1] < open[1] and close > open[1] and open < close[1] and close > close[1]
 
-bearish_engulfing = close < open and close[1] > open[1] and 
-                    close < open[1] and open > close[1] and 
-                    close < close[1]
+bearish_engulfing = close < open and close[1] > open[1] and close < open[1] and open > close[1] and close < close[1]
 
 // Pin bars (rejection candles)
 bullish_pin = (low < low[1] and close > (high + low) / 2) or 
@@ -170,13 +166,13 @@ rsi_bullish = rsi > 50 or (rsi < rsi_oversold + 10 and rsi > rsi[1])
 near_support = not na(support) and close <= support * 1.005 and close >= support * 0.995
 price_action_bullish = bullish_engulfing or bullish_pin
 
-// Enhanced buy conditions
-buy_signal = (ema_bullish_cross or (ema_bullish_aligned and is_uptrend)) and 
+// Enhanced buy conditions (relaxed - core conditions required, supporting optional)
+// Core: EMA cross/alignment AND MACD confirmation AND RSI condition
+// Supporting: Volume OR Support/VWAP OR Market structure (at least one)
+buy_signal_base = (ema_bullish_cross or (ema_bullish_aligned and is_uptrend)) and 
              (macd_bullish_cross or macd_bullish_aligned) and 
              rsi_bullish and 
-             (volume_spike or volume_trend_up) and
-             (near_support or price_action_bullish or price_above_vwap) and
-             (is_uptrend or (is_range and higher_highs_lows))
+             ((volume_spike or volume_trend_up) or (near_support or price_action_bullish or price_above_vwap) or (is_uptrend or (is_range and higher_highs_lows)))
 
 // SELL SIGNAL CONDITIONS (Exit Long / Take Profit) - Enhanced
 // 1. RSI overbought OR trend reversal
@@ -194,12 +190,11 @@ rsi_bearish = rsi < 50 or (rsi > rsi_overbought - 10 and rsi < rsi[1])
 near_resistance = not na(resistance) and close >= resistance * 0.995 and close <= resistance * 1.005
 price_action_bearish = bearish_engulfing or bearish_pin
 
-// Enhanced sell conditions
-sell_signal = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
+// Enhanced sell conditions (relaxed - core conditions required, supporting optional)
+sell_signal_base = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
               (macd_bearish_cross or macd_bearish_aligned) and 
               rsi_bearish and
-              (near_resistance or price_action_bearish or price_below_vwap) and
-              (is_downtrend or (is_range and lower_highs_lows))
+              ((near_resistance or price_action_bearish or price_below_vwap) or (is_downtrend or (is_range and lower_highs_lows)))
 
 // SHORT SIGNAL CONDITIONS (Short Entry) - Enhanced
 // 1. RSI overbought and starting to decline OR in downtrend
@@ -212,13 +207,50 @@ sell_signal = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and
 rsi_overbought_decline = rsi > rsi_overbought and rsi < rsi[1]
 rsi_bearish_short = rsi > rsi_overbought - 5 or (is_downtrend and rsi > 50)
 
-// Enhanced short conditions
-short_signal = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
+// Enhanced short conditions (relaxed - core conditions required, supporting optional)
+short_signal_base = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
                (macd_bearish_cross or macd_bearish_aligned) and 
                rsi_bearish_short and 
-               (volume_spike or volume_trend_up) and
-               (near_resistance or price_action_bearish or price_below_vwap) and
-               (is_downtrend or (is_range and lower_highs_lows))
+               ((volume_spike or volume_trend_up) or (near_resistance or price_action_bearish or price_below_vwap) or (is_downtrend or (is_range and lower_highs_lows)))
+
+// ============================================================================
+// MOVE PREDICTION & FILTERING (Only signal if move is worth taking)
+// ============================================================================
+test_mode = input.bool(false, "Test Mode (Relaxed Conditions)", tooltip="Enable to see more signals for testing", group="Signal Filtering")
+enable_move_filtering = input.bool(true, "Enable Move Filtering", group="Signal Filtering")
+min_move_percent = input.float(0.8, "Minimum Move % to Signal", minval=0.1, maxval=5.0, step=0.1, group="Signal Filtering")
+show_move_predictions = input.bool(true, "Show Move Predictions in Table", group="Signal Filtering")
+
+// Calculate potential move targets
+// For LONG: distance to resistance or ATR-based target
+potential_long_move = 0.0
+if not na(resistance) and resistance > close
+    potential_long_move := ((resistance - close) / close) * 100
+else
+    // Use ATR-based target if no resistance (always available)
+    potential_long_move := (atr * 2 / close) * 100
+
+// For SHORT: distance to support or ATR-based target  
+potential_short_move = 0.0
+if not na(support) and support < close
+    potential_short_move := ((close - support) / close) * 100
+else
+    // Use ATR-based target if no support (always available)
+    potential_short_move := (atr * 2 / close) * 100
+
+// For EXIT: use ATR-based exit (always available)
+potential_exit_move = (atr * 1.5 / close) * 100
+
+// Test mode: simplified conditions for testing
+buy_signal_test = (ema_bullish_cross or ema_bullish_aligned) and (macd_bullish_cross or macd_bullish_aligned) and rsi < rsi_overbought
+short_signal_test = (ema_bearish_cross or ema_bearish_aligned) and (macd_bearish_cross or macd_bearish_aligned) and rsi > rsi_oversold
+sell_signal_test = (ema_bearish_cross or ema_bearish_aligned) and rsi > rsi_overbought
+
+// Filter signals based on predicted move size
+// Make sure we always have a value (ATR fallback ensures this)
+buy_signal = (test_mode ? buy_signal_test : buy_signal_base) and (not enable_move_filtering or potential_long_move >= min_move_percent)
+short_signal = (test_mode ? short_signal_test : short_signal_base) and (not enable_move_filtering or potential_short_move >= min_move_percent)
+sell_signal = (test_mode ? sell_signal_test : sell_signal_base) and (not enable_move_filtering or potential_exit_move >= min_move_percent)
 
 // ============================================================================
 // VISUALIZATION
@@ -238,17 +270,23 @@ plot(resistance, "Resistance", color=color.red, style=plot.style_linebr, linewid
 // Market Structure Background
 bgcolor(is_uptrend ? color.new(color.green, 95) : is_downtrend ? color.new(color.red, 95) : na, title="Market Structure")
 
-// Buy Signals
+// Buy Signals with Labels
 plotshape(buy_signal, style=shape.triangleup, location=location.belowbar, 
-          color=color.lime, size=size.normal, title="BUY")
+          color=color.lime, size=size.large, title="LONG")
+if buy_signal
+    label.new(bar_index, low * 0.998, "LONG", style=label.style_label_up, color=color.lime, textcolor=color.white, size=size.normal)
 
-// Sell Signals
+// Sell Signals with Labels
 plotshape(sell_signal, style=shape.triangledown, location=location.abovebar, 
-          color=color.red, size=size.normal, title="SELL")
+          color=color.red, size=size.large, title="EXIT")
+if sell_signal
+    label.new(bar_index, high * 1.002, "EXIT", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal)
 
-// Short Signals
+// Short Signals with Labels
 plotshape(short_signal, style=shape.xcross, location=location.abovebar, 
-          color=color.fuchsia, size=size.normal, title="SHORT")
+          color=color.fuchsia, size=size.large, title="SHORT")
+if short_signal
+    label.new(bar_index, high * 1.002, "SHORT", style=label.style_label_down, color=color.fuchsia, textcolor=color.white, size=size.normal)
 
 // ============================================================================
 // ALERTS
@@ -263,7 +301,8 @@ alertcondition(short_signal, title="Short Signal", message="SHORT signal trigger
 show_table = input.bool(true, "Show Info Table", group="Display Options")
 
 if show_table and barstate.islast
-    var table info_table = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80), border_width=1)
+    rows = show_move_predictions ? 12 : 9
+    var table info_table = table.new(position.top_right, 2, rows, bgcolor=color.new(color.black, 80), border_width=1)
     table.cell(info_table, 0, 0, "Asset", text_color=color.white, bgcolor=color.new(color.gray, 50))
     table.cell(info_table, 1, 0, asset_type, text_color=color.white)
     table.cell(info_table, 0, 1, "Market", text_color=color.white, bgcolor=color.new(color.gray, 50))
@@ -290,4 +329,14 @@ if show_table and barstate.islast
     table.cell(info_table, 1, 7, str.tostring(math.round(atr_percent, 2)) + "%", text_color=color.white)
     table.cell(info_table, 0, 8, "R:R Ratio", text_color=color.white, bgcolor=color.new(color.gray, 50))
     table.cell(info_table, 1, 8, str.tostring(risk_reward_ratio) + ":1", text_color=color.white)
+    
+    if show_move_predictions
+        table.cell(info_table, 0, 9, "Min Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
+        table.cell(info_table, 1, 9, str.tostring(min_move_percent) + "%", text_color=color.yellow)
+        table.cell(info_table, 0, 10, "Long Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
+        table.cell(info_table, 1, 10, str.tostring(math.round(potential_long_move, 2)) + "%", 
+                   text_color=potential_long_move >= min_move_percent ? color.lime : color.gray)
+        table.cell(info_table, 0, 11, "Short Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
+        table.cell(info_table, 1, 11, str.tostring(math.round(potential_short_move, 2)) + "%", 
+                   text_color=potential_short_move >= min_move_percent ? color.lime : color.gray)
 
