@@ -231,9 +231,7 @@ htf_aligned = htf_1h_uptrend or (not htf_1h_downtrend and not htf_4h_downtrend) 
 entry_trigger = ema_bullish_cross or price_pullback_to_ema or price_pullback_to_vwap or (near_support and price_action_bullish)
 
 // Final signal - ALL conditions must align
-buy_signal_base = ema_bullish and macd_bullish and rsi_healthy and volume_confirmed and 
-                  vwap_bullish and trend_bullish and htf_aligned and entry_trigger and
-                  (is_uptrend or (is_range and higher_highs_lows))
+buy_signal_base = ema_bullish and macd_bullish and rsi_healthy and volume_confirmed and vwap_bullish and trend_bullish and htf_aligned and entry_trigger and (is_uptrend or (is_range and higher_highs_lows))
 
 // SELL SIGNAL CONDITIONS (Exit Long / Take Profit) - Enhanced
 // 1. RSI overbought OR trend reversal
@@ -286,9 +284,7 @@ htf_aligned_short = htf_1h_downtrend or (not htf_1h_uptrend and not htf_4h_uptre
 entry_trigger_short = ema_bearish_cross or price_pullback_to_ema_short or price_pullback_to_vwap_short or (near_resistance and price_action_bearish)
 
 // Final signal - ALL conditions must align
-short_signal_base = ema_bearish and macd_bearish and rsi_healthy_short and volume_confirmed_short and 
-                    vwap_bearish and trend_bearish and htf_aligned_short and entry_trigger_short and
-                    (is_downtrend or (is_range and lower_highs_lows))
+short_signal_base = ema_bearish and macd_bearish and rsi_healthy_short and volume_confirmed_short and vwap_bearish and trend_bearish and htf_aligned_short and entry_trigger_short and (is_downtrend or (is_range and lower_highs_lows))
 
 // ============================================================================
 // MOVE PREDICTION & FILTERING (Only signal if move is worth taking)
