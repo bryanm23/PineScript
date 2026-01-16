@@ -50,12 +50,16 @@ volume_threshold = asset_type == "Gold" ? gold_volume_threshold : crypto_volume_
 // INDICATOR CALCULATIONS
 // ============================================================================
 
-// RSI Calculation (Relative Strength Index)
+// RSI Calculation (Relative Strength Index) - optimized for scalping
 rsi = ta.rsi(close, rsi_length)
+rsi_above_50 = rsi > 50  // Bullish momentum
+rsi_below_50 = rsi < 50  // Bearish momentum
+rsi_neutral_zone = rsi >= 40 and rsi <= 60  // Good entry zone for pullbacks
 
 // EMA Calculation (Exponential Moving Averages)
 ema_fast = ta.ema(close, ema_fast_period)
 ema_slow = ta.ema(close, ema_slow_period)
+ema_200 = ta.ema(close, 200)  // Long-term trend filter for day trading
 
 // MACD Calculation
 [macd_line, signal_line, hist_line] = ta.macd(close, macd_fast_period, macd_slow_period, macd_signal_period)
@@ -204,17 +208,24 @@ ema_bullish_aligned = ema_fast > ema_slow
 macd_bullish_cross = ta.crossover(macd_line, signal_line)
 macd_bullish_aligned = macd_line > signal_line
 rsi_oversold_recovery = rsi < rsi_oversold and rsi > rsi[1]
-rsi_bullish = rsi > 50 or (rsi < rsi_oversold + 10 and rsi > rsi[1])
+rsi_bullish = rsi > 50 or (rsi < rsi_oversold + 10 and rsi > rsi[1]) or (rsi >= 40 and rsi <= 60 and rsi > rsi[1])  // Allow neutral zone recovery for day trading
 near_support = not na(support) and close <= support * 1.005 and close >= support * 0.995
 price_action_bullish = bullish_engulfing or bullish_pin
 
-// Enhanced buy conditions with higher timeframe confirmation
+// Day Trading LONG Entry: Pullback to EMA20/VWAP with momentum confirmation
+// Based on research: EMA20 pullback, RSI 40-60 zone, MACD positive, Volume spike, VWAP above
+price_near_ema20 = math.abs(close - ema_fast) / close <= 0.002  // Within 0.2% of fast EMA
+price_pullback_to_ema = low <= ema_fast and close >= ema_fast  // Pullback that holds
+price_pullback_to_vwap = low <= vwap and close >= vwap  // Pullback to VWAP
+
 buy_signal_base_raw = (ema_bullish_cross or (ema_bullish_aligned and is_uptrend)) and 
-             (macd_bullish_cross or macd_bullish_aligned) and 
-             rsi_bullish and 
+             (macd_bullish_cross or (macd_bullish_aligned and macd_line > 0)) and 
+             (rsi_bullish or (rsi_neutral_zone and rsi > rsi[1])) and  // RSI recovering from neutral zone
              (volume_spike or volume_trend_up) and
-             (near_support or near_htf_1h_support or near_htf_4h_support or price_action_bullish or price_above_vwap) and
-             (is_uptrend or (is_range and higher_highs_lows))
+             (price_pullback_to_ema or price_pullback_to_vwap or near_support or near_htf_1h_support or near_htf_4h_support or price_action_bullish) and
+             price_above_vwap and  // Must be above VWAP for longs
+             (is_uptrend or (is_range and higher_highs_lows)) and
+             close > ema_200  // Long-term trend must be up
 
 // Filter by higher timeframe trend (prefer aligned trends, but allow if not conflicting)
 buy_signal_base = buy_signal_base_raw and (htf_trend_aligned_up or (htf_1h_uptrend and not htf_trend_conflict) or (not htf_1h_downtrend and not htf_4h_downtrend))
@@ -250,15 +261,22 @@ sell_signal_base = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend))
 // 6. Market structure favors shorts (downtrend or range breakdown)
 
 rsi_overbought_decline = rsi > rsi_overbought and rsi < rsi[1]
-rsi_bearish_short = rsi > rsi_overbought - 5 or (is_downtrend and rsi > 50)
+rsi_bearish_short = rsi < 50 or (rsi > rsi_overbought - 10 and rsi < rsi[1])  // Fixed: allow shorts when RSI below 50
 
-// Enhanced short conditions with higher timeframe confirmation
+// Day Trading SHORT Entry: Pullback to EMA20/VWAP with momentum confirmation
+// Based on research: EMA20 pullback, RSI 40-60 zone, MACD negative, Volume spike, VWAP below
+price_near_ema20_short = math.abs(close - ema_fast) / close <= 0.002  // Within 0.2% of fast EMA
+price_pullback_to_ema_short = high >= ema_fast and close <= ema_fast  // Pullback that holds
+price_pullback_to_vwap_short = high >= vwap and close <= vwap  // Pullback to VWAP
+
 short_signal_base_raw = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
-               (macd_bearish_cross or macd_bearish_aligned) and 
-               rsi_bearish_short and 
+               (macd_bearish_cross or (macd_bearish_aligned and macd_line < 0)) and 
+               (rsi_bearish_short or (rsi_neutral_zone and rsi < rsi[1])) and  // RSI declining from neutral zone
                (volume_spike or volume_trend_up) and
-               (near_resistance or near_htf_1h_resistance or near_htf_4h_resistance or price_action_bearish or price_below_vwap) and
-               (is_downtrend or (is_range and lower_highs_lows))
+               (price_pullback_to_ema_short or price_pullback_to_vwap_short or near_resistance or near_htf_1h_resistance or near_htf_4h_resistance or price_action_bearish) and
+               price_below_vwap and  // Must be below VWAP for shorts
+               (is_downtrend or (is_range and lower_highs_lows)) and
+               close < ema_200  // Long-term trend must be down
 
 // Filter by higher timeframe trend (prefer aligned trends, but allow if not conflicting)
 short_signal_base = short_signal_base_raw and (htf_trend_aligned_down or (htf_1h_downtrend and not htf_trend_conflict) or (not htf_1h_uptrend and not htf_4h_uptrend))
@@ -268,33 +286,33 @@ short_signal_base = short_signal_base_raw and (htf_trend_aligned_down or (htf_1h
 // ============================================================================
 test_mode = input.bool(false, "Test Mode (Relaxed Conditions)", tooltip="Enable to see more signals for testing", group="Signal Filtering")
 enable_move_filtering = input.bool(true, "Enable Move Filtering", group="Signal Filtering")
-min_move_percent = input.float(0.8, "Minimum Move % to Signal", minval=0.1, maxval=5.0, step=0.1, group="Signal Filtering")
+min_move_percent = input.float(1.0, "Minimum Move % to Signal (Day Trading Target)", minval=0.1, maxval=5.0, step=0.1, group="Signal Filtering", tooltip="Target 1% profit per trade for day trading")
 show_move_predictions = input.bool(true, "Show Move Predictions in Table", group="Signal Filtering")
 
-// Calculate potential move targets (using higher timeframe levels when available)
-// For LONG: distance to resistance (prefer HTF levels, then local, then ATR)
+// Calculate potential move targets for day trading (1% target focus)
+// For LONG: Use 1% target or nearest resistance, whichever is closer
+target_1_percent_long = close * 1.01  // 1% profit target
 potential_long_move = 0.0
-if not na(htf_4h_resistance) and htf_4h_resistance > close
-    potential_long_move := ((htf_4h_resistance - close) / close) * 100
-else if not na(htf_1h_resistance) and htf_1h_resistance > close
+// Check if 1% target is reasonable (not beyond major resistance)
+if not na(htf_1h_resistance) and htf_1h_resistance > close and htf_1h_resistance < target_1_percent_long
     potential_long_move := ((htf_1h_resistance - close) / close) * 100
-else if not na(resistance) and resistance > close
+else if not na(resistance) and resistance > close and resistance < target_1_percent_long
     potential_long_move := ((resistance - close) / close) * 100
 else
-    // Use ATR-based target if no resistance (always available)
-    potential_long_move := (atr * 2 / close) * 100
+    // Default to 1% target for day trading
+    potential_long_move := 1.0
 
-// For SHORT: distance to support (prefer HTF levels, then local, then ATR)
+// For SHORT: Use 1% target or nearest support, whichever is closer
+target_1_percent_short = close * 0.99  // 1% profit target
 potential_short_move = 0.0
-if not na(htf_4h_support) and htf_4h_support < close
-    potential_short_move := ((close - htf_4h_support) / close) * 100
-else if not na(htf_1h_support) and htf_1h_support < close
+// Check if 1% target is reasonable (not beyond major support)
+if not na(htf_1h_support) and htf_1h_support < close and htf_1h_support > target_1_percent_short
     potential_short_move := ((close - htf_1h_support) / close) * 100
-else if not na(support) and support < close
+else if not na(support) and support < close and support > target_1_percent_short
     potential_short_move := ((close - support) / close) * 100
 else
-    // Use ATR-based target if no support (always available)
-    potential_short_move := (atr * 2 / close) * 100
+    // Default to 1% target for day trading
+    potential_short_move := 1.0
 
 // For EXIT: use ATR-based exit (always available)
 potential_exit_move = (atr * 1.5 / close) * 100
@@ -317,6 +335,7 @@ sell_signal = (test_mode ? sell_signal_test : sell_signal_base) and (not enable_
 // Plot EMAs
 plot(ema_fast, "Fast EMA", color=color.blue, linewidth=2)
 plot(ema_slow, "Slow EMA", color=color.orange, linewidth=2)
+plot(ema_200, "EMA 200", color=color.gray, linewidth=1, style=plot.style_line)  // Long-term trend
 
 // Plot VWAP (important for day trading)
 plot(vwap, "VWAP", color=color.purple, linewidth=1, style=plot.style_line)
