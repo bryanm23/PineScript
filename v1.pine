@@ -212,23 +212,28 @@ rsi_bullish = rsi > 50 or (rsi < rsi_oversold + 10 and rsi > rsi[1]) or (rsi >= 
 near_support = not na(support) and close <= support * 1.005 and close >= support * 0.995
 price_action_bullish = bullish_engulfing or bullish_pin
 
-// Day Trading LONG Entry: Pullback to EMA20/VWAP with momentum confirmation
-// Based on research: EMA20 pullback, RSI 40-60 zone, MACD positive, Volume spike, VWAP above
-price_near_ema20 = math.abs(close - ema_fast) / close <= 0.002  // Within 0.2% of fast EMA
-price_pullback_to_ema = low <= ema_fast and close >= ema_fast  // Pullback that holds
-price_pullback_to_vwap = low <= vwap and close >= vwap  // Pullback to VWAP
+// AUTOMATED DAY TRADING LONG ENTRY - Multiple Confirmations Required
+// Designed for inexperienced traders - only high-probability setups
+price_near_ema20 = math.abs(close - ema_fast) / close <= 0.003  // Within 0.3% of fast EMA
+price_pullback_to_ema = low <= ema_fast and close >= ema_fast * 0.998  // Pullback that holds (within 0.2%)
+price_pullback_to_vwap = low <= vwap * 1.001 and close >= vwap * 0.999  // Pullback to VWAP
 
-buy_signal_base_raw = (ema_bullish_cross or (ema_bullish_aligned and is_uptrend)) and 
-             (macd_bullish_cross or (macd_bullish_aligned and macd_line > 0)) and 
-             (rsi_bullish or (rsi_neutral_zone and rsi > rsi[1])) and  // RSI recovering from neutral zone
-             (volume_spike or volume_trend_up) and
-             (price_pullback_to_ema or price_pullback_to_vwap or near_support or near_htf_1h_support or near_htf_4h_support or price_action_bullish) and
-             price_above_vwap and  // Must be above VWAP for longs
-             (is_uptrend or (is_range and higher_highs_lows)) and
-             close > ema_200  // Long-term trend must be up
+// Core requirements (ALL must be true for high-probability trade)
+ema_bullish = ema_fast > ema_slow  // EMA alignment
+macd_bullish = macd_line > signal_line and macd_line > 0  // MACD positive and bullish
+rsi_healthy = rsi >= 40 and rsi <= 65 and rsi > rsi[1]  // RSI in healthy zone and rising
+volume_confirmed = volume_spike  // Strong volume confirmation (required)
+vwap_bullish = close > vwap  // Price above VWAP
+trend_bullish = close > ema_200 and ema_fast > ema_slow  // Long-term and short-term trend up
+htf_aligned = htf_1h_uptrend or (not htf_1h_downtrend and not htf_4h_downtrend)  // Higher timeframe not against us
 
-// Filter by higher timeframe trend (prefer aligned trends, but allow if not conflicting)
-buy_signal_base = buy_signal_base_raw and (htf_trend_aligned_up or (htf_1h_uptrend and not htf_trend_conflict) or (not htf_1h_downtrend and not htf_4h_downtrend))
+// Entry trigger (at least one of these)
+entry_trigger = ema_bullish_cross or price_pullback_to_ema or price_pullback_to_vwap or (near_support and price_action_bullish)
+
+// Final signal - ALL conditions must align
+buy_signal_base = ema_bullish and macd_bullish and rsi_healthy and volume_confirmed and 
+                  vwap_bullish and trend_bullish and htf_aligned and entry_trigger and
+                  (is_uptrend or (is_range and higher_highs_lows))
 
 // SELL SIGNAL CONDITIONS (Exit Long / Take Profit) - Enhanced
 // 1. RSI overbought OR trend reversal
@@ -246,11 +251,10 @@ rsi_bearish = rsi < 50 or (rsi > rsi_overbought - 10 and rsi < rsi[1])
 near_resistance = not na(resistance) and close >= resistance * 0.995 and close <= resistance * 1.005
 price_action_bearish = bearish_engulfing or bearish_pin
 
-// Enhanced sell conditions (relaxed - core conditions required, supporting optional)
-sell_signal_base = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
-              (macd_bearish_cross or macd_bearish_aligned) and 
-              rsi_bearish and
-              ((near_resistance or price_action_bearish or price_below_vwap) or (is_downtrend or (is_range and lower_highs_lows)))
+// EXIT SIGNAL - Clear exit conditions for inexperienced traders
+// Exit long when: RSI overbought OR trend reversal with confirmation
+sell_signal_base = ((ema_bearish_cross and macd_bearish_cross) or (rsi > rsi_overbought and ema_fast < ema_slow)) and 
+              (is_downtrend or rsi > rsi_overbought)
 
 // SHORT SIGNAL CONDITIONS (Short Entry) - Enhanced
 // 1. RSI overbought and starting to decline OR in downtrend
@@ -263,30 +267,36 @@ sell_signal_base = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend))
 rsi_overbought_decline = rsi > rsi_overbought and rsi < rsi[1]
 rsi_bearish_short = rsi < 50 or (rsi > rsi_overbought - 10 and rsi < rsi[1])  // Fixed: allow shorts when RSI below 50
 
-// Day Trading SHORT Entry: Pullback to EMA20/VWAP with momentum confirmation
-// Based on research: EMA20 pullback, RSI 40-60 zone, MACD negative, Volume spike, VWAP below
-price_near_ema20_short = math.abs(close - ema_fast) / close <= 0.002  // Within 0.2% of fast EMA
-price_pullback_to_ema_short = high >= ema_fast and close <= ema_fast  // Pullback that holds
-price_pullback_to_vwap_short = high >= vwap and close <= vwap  // Pullback to VWAP
+// AUTOMATED DAY TRADING SHORT ENTRY - Multiple Confirmations Required
+// Designed for inexperienced traders - only high-probability setups
+price_near_ema20_short = math.abs(close - ema_fast) / close <= 0.003  // Within 0.3% of fast EMA
+price_pullback_to_ema_short = high >= ema_fast and close <= ema_fast * 1.002  // Pullback that holds (within 0.2%)
+price_pullback_to_vwap_short = high >= vwap * 0.999 and close <= vwap * 1.001  // Pullback to VWAP
 
-short_signal_base_raw = (ema_bearish_cross or (ema_bearish_aligned and is_downtrend)) and 
-               (macd_bearish_cross or (macd_bearish_aligned and macd_line < 0)) and 
-               (rsi_bearish_short or (rsi_neutral_zone and rsi < rsi[1])) and  // RSI declining from neutral zone
-               (volume_spike or volume_trend_up) and
-               (price_pullback_to_ema_short or price_pullback_to_vwap_short or near_resistance or near_htf_1h_resistance or near_htf_4h_resistance or price_action_bearish) and
-               price_below_vwap and  // Must be below VWAP for shorts
-               (is_downtrend or (is_range and lower_highs_lows)) and
-               close < ema_200  // Long-term trend must be down
+// Core requirements (ALL must be true for high-probability trade)
+ema_bearish = ema_fast < ema_slow  // EMA alignment
+macd_bearish = macd_line < signal_line and macd_line < 0  // MACD negative and bearish
+rsi_healthy_short = rsi >= 35 and rsi <= 60 and rsi < rsi[1]  // RSI in healthy zone and falling
+volume_confirmed_short = volume_spike  // Strong volume confirmation (required)
+vwap_bearish = close < vwap  // Price below VWAP
+trend_bearish = close < ema_200 and ema_fast < ema_slow  // Long-term and short-term trend down
+htf_aligned_short = htf_1h_downtrend or (not htf_1h_uptrend and not htf_4h_uptrend)  // Higher timeframe not against us
 
-// Filter by higher timeframe trend (prefer aligned trends, but allow if not conflicting)
-short_signal_base = short_signal_base_raw and (htf_trend_aligned_down or (htf_1h_downtrend and not htf_trend_conflict) or (not htf_1h_uptrend and not htf_4h_uptrend))
+// Entry trigger (at least one of these)
+entry_trigger_short = ema_bearish_cross or price_pullback_to_ema_short or price_pullback_to_vwap_short or (near_resistance and price_action_bearish)
+
+// Final signal - ALL conditions must align
+short_signal_base = ema_bearish and macd_bearish and rsi_healthy_short and volume_confirmed_short and 
+                    vwap_bearish and trend_bearish and htf_aligned_short and entry_trigger_short and
+                    (is_downtrend or (is_range and lower_highs_lows))
 
 // ============================================================================
 // MOVE PREDICTION & FILTERING (Only signal if move is worth taking)
 // ============================================================================
-test_mode = input.bool(false, "Test Mode (Relaxed Conditions)", tooltip="Enable to see more signals for testing", group="Signal Filtering")
-enable_move_filtering = input.bool(true, "Enable Move Filtering", group="Signal Filtering")
-min_move_percent = input.float(1.0, "Minimum Move % to Signal (Day Trading Target)", minval=0.1, maxval=5.0, step=0.1, group="Signal Filtering", tooltip="Target 1% profit per trade for day trading")
+// Signal Filtering - Optimized for Inexperienced Traders
+test_mode = input.bool(false, "Test Mode (Relaxed Conditions)", tooltip="Enable to see more signals for testing - NOT recommended for live trading", group="Signal Filtering")
+enable_move_filtering = input.bool(true, "Enable Move Filtering", group="Signal Filtering", tooltip="Only show signals with 1%+ profit potential")
+min_move_percent = input.float(1.0, "Minimum Move % to Signal (Day Trading Target)", minval=0.1, maxval=5.0, step=0.1, group="Signal Filtering", tooltip="Target 1% profit per trade for day trading - recommended: 1.0%")
 show_move_predictions = input.bool(true, "Show Move Predictions in Table", group="Signal Filtering")
 
 // Calculate potential move targets for day trading (1% target focus)
@@ -317,9 +327,9 @@ else
 // For EXIT: use ATR-based exit (always available)
 potential_exit_move = (atr * 1.5 / close) * 100
 
-// Test mode: simplified conditions for testing
-buy_signal_test = (ema_bullish_cross or ema_bullish_aligned) and (macd_bullish_cross or macd_bullish_aligned) and rsi < rsi_overbought
-short_signal_test = (ema_bearish_cross or ema_bearish_aligned) and (macd_bearish_cross or macd_bearish_aligned) and rsi > rsi_oversold
+// Test mode: simplified conditions for testing (NOT for live trading)
+buy_signal_test = (ema_bullish_cross or ema_bullish_aligned) and (macd_bullish_cross or macd_bullish_aligned) and rsi < rsi_overbought and volume_spike
+short_signal_test = (ema_bearish_cross or ema_bearish_aligned) and (macd_bearish_cross or macd_bearish_aligned) and rsi > rsi_oversold and volume_spike
 sell_signal_test = (ema_bearish_cross or ema_bearish_aligned) and rsi > rsi_overbought
 
 // Filter signals based on predicted move size
@@ -353,11 +363,11 @@ plot(htf_4h_resistance, "4H Resistance", color=color.new(color.red, 50), style=p
 // Market Structure Background
 bgcolor(is_uptrend ? color.new(color.green, 95) : is_downtrend ? color.new(color.red, 95) : na, title="Market Structure")
 
-// Buy Signals with Labels
+// Buy Signals with Labels - Clear and Obvious for Inexperienced Traders
 plotshape(buy_signal, style=shape.triangleup, location=location.belowbar, 
           color=color.lime, size=size.large, title="LONG")
 if buy_signal
-    label.new(bar_index, low * 0.998, "LONG", style=label.style_label_up, color=color.lime, textcolor=color.white, size=size.normal)
+    label.new(bar_index, low * 0.998, "LONG\nENTER", style=label.style_label_up, color=color.lime, textcolor=color.white, size=size.large)
 
 // Sell Signals with Labels
 plotshape(sell_signal, style=shape.triangledown, location=location.abovebar, 
@@ -365,11 +375,11 @@ plotshape(sell_signal, style=shape.triangledown, location=location.abovebar,
 if sell_signal
     label.new(bar_index, high * 1.002, "EXIT", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal)
 
-// Short Signals with Labels
+// Short Signals with Labels - Clear and Obvious for Inexperienced Traders
 plotshape(short_signal, style=shape.xcross, location=location.abovebar, 
           color=color.fuchsia, size=size.large, title="SHORT")
 if short_signal
-    label.new(bar_index, high * 1.002, "SHORT", style=label.style_label_down, color=color.fuchsia, textcolor=color.white, size=size.normal)
+    label.new(bar_index, high * 1.002, "SHORT\nENTER", style=label.style_label_down, color=color.fuchsia, textcolor=color.white, size=size.large)
 
 // ============================================================================
 // ALERTS
@@ -384,50 +394,54 @@ alertcondition(short_signal, title="Short Signal", message="SHORT signal trigger
 show_table = input.bool(true, "Show Info Table", group="Display Options")
 
 if show_table and barstate.islast
-    rows = show_move_predictions ? 15 : 12
+    rows = show_move_predictions ? 16 : 13
     var table info_table = table.new(position.top_right, 2, rows, bgcolor=color.new(color.black, 80), border_width=1)
-    table.cell(info_table, 0, 0, "Asset", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    table.cell(info_table, 1, 0, asset_type, text_color=color.white)
-    table.cell(info_table, 0, 1, "Market", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 0, 0, "TRADING SIGNAL", text_color=color.white, bgcolor=color.new(color.gray, 30))
+    signal_status = buy_signal ? "LONG - ENTER" : short_signal ? "SHORT - ENTER" : sell_signal ? "EXIT POSITION" : "WAIT FOR SIGNAL"
+    signal_color = buy_signal ? color.lime : short_signal ? color.fuchsia : sell_signal ? color.red : color.gray
+    table.cell(info_table, 1, 0, signal_status, text_color=signal_color, bgcolor=color.new(signal_color, 90))
+    table.cell(info_table, 0, 1, "Asset", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 1, asset_type, text_color=color.white)
+    table.cell(info_table, 0, 2, "Market", text_color=color.white, bgcolor=color.new(color.gray, 50))
     market_structure_text = is_uptrend ? "Uptrend" : is_downtrend ? "Downtrend" : "Range"
     market_structure_color = is_uptrend ? color.lime : is_downtrend ? color.red : color.yellow
-    table.cell(info_table, 1, 1, market_structure_text, text_color=market_structure_color)
-    table.cell(info_table, 0, 2, "1H Trend", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 2, market_structure_text, text_color=market_structure_color)
+    table.cell(info_table, 0, 3, "1H Trend", text_color=color.white, bgcolor=color.new(color.gray, 50))
     htf_1h_text = htf_1h_uptrend ? "Up" : htf_1h_downtrend ? "Down" : "Range"
     htf_1h_color = htf_1h_uptrend ? color.lime : htf_1h_downtrend ? color.red : color.yellow
-    table.cell(info_table, 1, 2, htf_1h_text, text_color=htf_1h_color)
-    table.cell(info_table, 0, 3, "4H Trend", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 3, htf_1h_text, text_color=htf_1h_color)
+    table.cell(info_table, 0, 4, "4H Trend", text_color=color.white, bgcolor=color.new(color.gray, 50))
     htf_4h_text = htf_4h_uptrend ? "Up" : htf_4h_downtrend ? "Down" : "Range"
     htf_4h_color = htf_4h_uptrend ? color.lime : htf_4h_downtrend ? color.red : color.yellow
-    table.cell(info_table, 1, 3, htf_4h_text, text_color=htf_4h_color)
-    table.cell(info_table, 0, 4, "RSI", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    table.cell(info_table, 1, 4, str.tostring(math.round(rsi, 2)), 
-               text_color=rsi > rsi_overbought ? color.red : rsi < rsi_oversold ? color.lime : color.white)
-    table.cell(info_table, 0, 5, "EMA Cross", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    table.cell(info_table, 1, 5, ema_fast > ema_slow ? "Bullish" : "Bearish", 
+    table.cell(info_table, 1, 4, htf_4h_text, text_color=htf_4h_color)
+    table.cell(info_table, 0, 5, "RSI", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 5, str.tostring(math.round(rsi, 2)), 
+               text_color=rsi > rsi_overbought ? color.red : rsi < rsi_oversold ? color.lime : (rsi >= 40 and rsi <= 60) ? color.yellow : color.white)
+    table.cell(info_table, 0, 6, "EMA Cross", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 6, ema_fast > ema_slow ? "Bullish" : "Bearish", 
                text_color=ema_fast > ema_slow ? color.lime : color.red)
-    table.cell(info_table, 0, 6, "MACD", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    table.cell(info_table, 1, 6, macd_line > signal_line ? "Bullish" : "Bearish", 
+    table.cell(info_table, 0, 7, "MACD", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 7, macd_line > signal_line ? "Bullish" : "Bearish", 
                text_color=macd_line > signal_line ? color.lime : color.red)
-    table.cell(info_table, 0, 7, "Volume", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    volume_status = volume_spike ? "High" : volume_trend_up ? "Rising" : "Normal"
-    table.cell(info_table, 1, 7, volume_status, 
+    table.cell(info_table, 0, 8, "Volume", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    volume_status = volume_spike ? "High ✓" : volume_trend_up ? "Rising" : "Normal"
+    table.cell(info_table, 1, 8, volume_status, 
                text_color=volume_spike ? color.yellow : volume_trend_up ? color.orange : color.white)
-    table.cell(info_table, 0, 8, "VWAP", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    table.cell(info_table, 1, 8, price_above_vwap ? "Above" : "Below", 
+    table.cell(info_table, 0, 9, "VWAP", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 9, price_above_vwap ? "Above ✓" : "Below", 
                text_color=price_above_vwap ? color.lime : color.red)
-    table.cell(info_table, 0, 9, "ATR %", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    table.cell(info_table, 1, 9, str.tostring(math.round(atr_percent, 2)) + "%", text_color=color.white)
-    table.cell(info_table, 0, 10, "R:R Ratio", text_color=color.white, bgcolor=color.new(color.gray, 50))
-    table.cell(info_table, 1, 10, str.tostring(risk_reward_ratio) + ":1", text_color=color.white)
+    table.cell(info_table, 0, 10, "ATR %", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 10, str.tostring(math.round(atr_percent, 2)) + "%", text_color=color.white)
+    table.cell(info_table, 0, 11, "R:R Ratio", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(info_table, 1, 11, str.tostring(risk_reward_ratio) + ":1", text_color=color.white)
     
     if show_move_predictions
-        table.cell(info_table, 0, 11, "Min Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
-        table.cell(info_table, 1, 11, str.tostring(min_move_percent) + "%", text_color=color.yellow)
-        table.cell(info_table, 0, 12, "Long Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
-        table.cell(info_table, 1, 12, str.tostring(math.round(potential_long_move, 2)) + "%", 
+        table.cell(info_table, 0, 12, "Target", text_color=color.white, bgcolor=color.new(color.gray, 50))
+        table.cell(info_table, 1, 12, str.tostring(min_move_percent) + "%", text_color=color.yellow)
+        table.cell(info_table, 0, 13, "Long Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
+        table.cell(info_table, 1, 13, str.tostring(math.round(potential_long_move, 2)) + "%", 
                    text_color=potential_long_move >= min_move_percent ? color.lime : color.gray)
-        table.cell(info_table, 0, 13, "Short Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
-        table.cell(info_table, 1, 13, str.tostring(math.round(potential_short_move, 2)) + "%", 
+        table.cell(info_table, 0, 14, "Short Move", text_color=color.white, bgcolor=color.new(color.gray, 50))
+        table.cell(info_table, 1, 14, str.tostring(math.round(potential_short_move, 2)) + "%", 
                    text_color=potential_short_move >= min_move_percent ? color.lime : color.gray)
 
