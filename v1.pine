@@ -284,7 +284,7 @@ htf_aligned_short = htf_1h_downtrend or (not htf_1h_uptrend and not htf_4h_uptre
 entry_trigger_short = ema_bearish_cross or price_pullback_to_ema_short or price_pullback_to_vwap_short or (near_resistance and price_action_bearish)
 
 // Final signal - ALL conditions must align
-short_signal_base = ema_bearish and macd_bearish and rsi_healthy_short and volume_confirmed_short and vwap_bearish and trend_bearish and htf_aligned_short and entry_trigger_short and (is_downtrend or (is_range and lower_highs_lows))
+short_signal_base = (ema_bearish and macd_bearish and rsi_healthy_short and volume_confirmed_short and vwap_bearish and trend_bearish and htf_aligned_short and entry_trigger_short and (is_downtrend or (is_range and lower_highs_lows)))
 
 // ============================================================================
 // MOVE PREDICTION & FILTERING (Only signal if move is worth taking)
